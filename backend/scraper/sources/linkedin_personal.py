@@ -828,6 +828,10 @@ async def _scrape_collection(page, url: str, collection_name: str) -> list[dict]
 
 async def run(search: Search) -> dict:
     """Main entry point for linkedin_personal search mode. Scrape collections and save to DB."""
+    from backend.config import JN_ENABLE_UNOFFICIAL_LINKEDIN
+    if not JN_ENABLE_UNOFFICIAL_LINKEDIN:
+        logger.info("linkedin_personal disabled (JN_ENABLE_UNOFFICIAL_LINKEDIN=0)")
+        return {"jobs_found": 0, "new_jobs": 0, "disabled": True}
     start_time = time.time()
 
     pw = None

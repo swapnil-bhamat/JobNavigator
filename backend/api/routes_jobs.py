@@ -933,7 +933,7 @@ async def save_from_extension(body: dict, db: Session = Depends(get_db)):
 
 # Statuses a hand-added feed job may start at. `applied` is not one of them:
 # POST /applications owns that path and writes the Application row with it.
-MANUAL_JOB_STATUSES = {"new", "saved"}
+MANUAL_JOB_STATUSES = {"new", "saved", "discovered", "shortlisted"}
 
 
 @router.post("/manual")
@@ -945,6 +945,11 @@ def create_manual_job(body: dict, background_tasks: BackgroundTasks, db: Session
     status = str_field(body, "status") or "new"
     if not title or not company or not url:
         raise HTTPException(status_code=400, detail="title, company, and url are required")
+    from backend.scraper._shared.url_safety import UnsafeURLError, assert_public_http_url
+    try:
+        assert_public_http_url(url)
+    except UnsafeURLError as e:
+        raise HTTPException(status_code=400, detail=f"Unsafe URL rejected: {e}")
     if status not in MANUAL_JOB_STATUSES:
         raise HTTPException(status_code=400,
                             detail=f"status must be one of {sorted(MANUAL_JOB_STATUSES)}")
@@ -969,7 +974,7 @@ def create_manual_job(body: dict, background_tasks: BackgroundTasks, db: Session
         status=status,
         location=str_field(body, "location") or None,
         # `saved` and status='saved' move together everywhere else in the feed.
-        saved=(status == "saved"),
+        saved=(status in ("saved", "shortlisted")),
         seen=True,         # the user typed this row in; it is not an unseen find
     )
     # A hand-added job has to answer the feed's Location and Work filters like any
@@ -988,6 +993,19 @@ def create_manual_job(body: dict, background_tasks: BackgroundTasks, db: Session
     background_tasks.add_task(_fetch_and_store_description, str(job.id), url)
 
     return {"id": str(job.id), "created": True, "status": job.status}
+
+
+@router.post("/{job_id}/evaluate")
+async def evaluate_job_endpoint(job_id: str, force: bool = False, db: Session = Depends(get_db)):
+    """Evaluate a job against the account's Persona using weighted Gemini matching."""
+    from backend.accounts.owned import get_persona
+    from backend.analyzer.job_matcher import evaluate_job
+
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    persona = get_persona(db)
+    return await evaluate_job(db, job, persona, force=force)
 
 
 # Column types for the three fields both job writers accept. Without this a

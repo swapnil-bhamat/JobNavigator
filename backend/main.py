@@ -56,8 +56,15 @@ async def lifespan(app: FastAPI):
     prepare_upgrade()
     # Boot DDL waits for locks without the app's lock_timeout (S2-01): a restart during
     # a long pg_dump must wait for it, not fail.
-    from backend.models.db import lock_timeout_exempt
+    from backend.models.db import lock_timeout_exempt, DATABASE_URL
     with lock_timeout_exempt():
+        if DATABASE_URL.startswith("postgresql"):
+            from alembic.config import Config as _AlembicConfig
+            from alembic import command as _alembic_command
+            import os as _os_alembic
+            _ini = _os_alembic.path.join(_os_alembic.path.dirname(__file__), "alembic.ini")
+            _cfg = _AlembicConfig(_ini)
+            _alembic_command.upgrade(_cfg, "head")
         create_tables()
         run_seeds()
 

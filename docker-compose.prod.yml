@@ -1,0 +1,99 @@
+name: jobnavigator-prod
+
+# Production Compose blueprint for HP t620 (Debian 13, 4c @ 1.5 GHz, 16 GB RAM).
+# Do NOT deploy until all 9 release gate checks pass on the local Linux PC.
+# Existing host Caddy handles HTTPS and reverse-proxies to 127.0.0.1:8088.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      POSTGRES_USER: jobnavigator
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: jobnavigator
+    volumes:
+      - pgdata_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobnavigator"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+          cpus: "0.75"
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    env_file:
+      - .env.prod
+    environment:
+      DATABASE_URL: postgresql://jobnavigator:${POSTGRES_PASSWORD}@db:5432/jobnavigator
+      JN_RUNNER_MANAGEMENT: "0"
+      JN_ENABLE_GMAIL: ${JN_ENABLE_GMAIL:-0}
+      JN_ENABLE_UNOFFICIAL_LINKEDIN: ${JN_ENABLE_UNOFFICIAL_LINKEDIN:-0}
+      JN_TELEMETRY: "off"
+      MAX_CONCURRENT_SCRAPES: ${MAX_CONCURRENT_SCRAPES:-1}
+      SCORING_MAX_CONCURRENT: ${SCORING_MAX_CONCURRENT:-1}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backups:/app/backups
+      - career_data_prod:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+          cpus: "1.5"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    ports:
+      - "127.0.0.1:8088:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/ >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: "0.25"
+
+volumes:
+  pgdata_prod:
+  career_data_prod:

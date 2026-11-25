@@ -8,12 +8,20 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from backend.models.db import SessionLocal
 from backend.accounts.settings import get_setting
+from backend.analyzer.budget_guard import (
+    BudgetExceededError,
+    estimate_call_cost_inr,
+    reconcile_budget,
+    reserve_budget,
+    run_notify_async,
+)
+from backend.analyzer.llm_cost import calc_cost
 
 logger = logging.getLogger("jobnavigator.llm")
 
 
-DEFAULT_PROVIDER = "claude_api"
-DEFAULT_MODEL = "claude-sonnet-5"
+DEFAULT_PROVIDER = "gemini"
+DEFAULT_MODEL = os.getenv("GEMINI_MODEL_TRIAGE", "").strip() or os.getenv("GEMINI_MODEL_FULL", "").strip()
 _QUOTA_RE = re.compile(r"usage limit|rate limit|quota|too many requests|\b429\b", re.I)
 
 # Reasoning-effort values each provider accepts; "" sends none, so the model uses its own default.
@@ -113,15 +121,49 @@ async def call_llm(prompt: str, system: str, max_tokens: int = 1200,
     # prefix concatenated into the prompt (no cache discount).
     caching = bool(cached_prefix) and provider == "claude_api"
 
-    # Try primary with retries
+    # Try primary with retries (budget-guarded per attempt so retries are accounted for)
     last_primary_err = None
     for attempt in range(1, MAX_ATTEMPTS + 1):
+        est_inr = estimate_call_cost_inr(provider, model, prompt, system, max_tokens)
+        reservation_id = None
+        if est_inr > 0:
+            bdb = SessionLocal()
+            try:
+                res_row = reserve_budget(bdb, purpose="llm_call", estimated_inr=est_inr)
+                reservation_id = res_row.id
+            finally:
+                bdb.close()
         try:
             logger.info(f"LLM call: provider={provider}, model={model}, attempt={attempt}/{MAX_ATTEMPTS}, caching={'on' if caching else 'off'}")
             res = await _dispatch(provider, model, api_key, prompt, system, max_tokens,
                                   cached_prefix=cached_prefix, effort=effort)
-            return {**res, "provider": provider, "model": model}
+            if reservation_id is not None:
+                usage = res.get("usage") or {}
+                actual_usd = calc_cost(
+                    provider,
+                    model,
+                    input_tokens=usage.get("input_tokens", 0),
+                    output_tokens=usage.get("output_tokens", 0),
+                    cache_read_tokens=usage.get("cache_read_tokens", 0),
+                    cache_write_tokens=usage.get("cache_write_tokens", 0),
+                )
+                bdb = SessionLocal()
+                try:
+                    rec = reconcile_budget(bdb, reservation_id, actual_usd=actual_usd)
+                finally:
+                    bdb.close()
+                run_notify_async(rec)
+            return {**res, "provider": provider, "model": model, "reservation_id": reservation_id}
+        except BudgetExceededError:
+            raise
         except Exception as e:
+            if reservation_id is not None:
+                bdb = SessionLocal()
+                try:
+                    rec = reconcile_budget(bdb, reservation_id, actual_usd=0.0, failed_billable=not isinstance(e, NonRetryableLLMError))
+                finally:
+                    bdb.close()
+                run_notify_async(rec)
             last_primary_err = e
             if isinstance(e, NonRetryableLLMError):
                 logger.warning(f"LLM primary failed, not retrying: {e}")
@@ -491,8 +533,10 @@ async def _dispatch(provider: str, model: str, api_key: str,
         return await _call_codex_cli(combined, system, model, max_tokens, effort=effort)
     elif provider == "antigravity_cli":
         return await _call_antigravity_cli(combined, system, model, max_tokens)
+    elif provider == "gemini":
+        return await _call_gemini(combined, system, model, _gemini_key(api_key), max_tokens)
     elif provider == "openai":
-        return await _call_openai(combined, system, model, _openai_key(api_key), max_tokens, effort=effort)
+        raise NonRetryableLLMError("OpenAI provider is disabled; use Google Gemini (gemini) instead.")
     elif provider == "openrouter":
         # OpenRouter is OpenAI-API-compatible — same client, different base URL.
         # One key reaches every vendor's models (model slug is vendor-prefixed).
@@ -627,6 +671,53 @@ def _claude_code_token() -> str:
         return claude_code_token(db)
     finally:
         db.close()
+
+
+def _gemini_key(api_key: str) -> str:
+    """Resolve GEMINI_API_KEY from setting or .env (owner/inherit only)."""
+    if api_key:
+        return api_key
+    if _own_login_account() is None:
+        env_key = os.getenv("GEMINI_API_KEY", "").strip()
+        if env_key:
+            return env_key
+    raise NonRetryableLLMError(
+        "No API key for Gemini — set GEMINI_API_KEY in .env"
+    )
+
+
+async def _call_gemini(prompt: str, system: str, model: str, api_key: str, max_tokens: int) -> dict:
+    """Call Google Gemini API via the official google-genai SDK."""
+    from google import genai
+    from google.genai import types
+
+    if not model:
+        raise NonRetryableLLMError("No Gemini model configured — set GEMINI_MODEL_TRIAGE or GEMINI_MODEL_FULL in .env")
+
+    client = genai.Client(api_key=api_key)
+    cfg = types.GenerateContentConfig(
+        system_instruction=system or None,
+        max_output_tokens=max_tokens,
+    )
+    resp = await client.aio.models.generate_content(
+        model=model,
+        contents=prompt,
+        config=cfg,
+    )
+    text = getattr(resp, "text", "") or ""
+    meta = getattr(resp, "usage_metadata", None)
+    input_tokens = int(getattr(meta, "prompt_token_count", 0) or 0)
+    output_tokens = int(getattr(meta, "candidates_token_count", 0) or 0)
+    cache_read = int(getattr(meta, "cached_content_token_count", 0) or 0)
+    return {
+        "text": text,
+        "usage": {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cache_read_tokens": cache_read,
+            "cache_write_tokens": 0,
+        },
+    }
 
 
 async def _call_openai(prompt: str, system: str, model: str, api_key: str, max_tokens: int,

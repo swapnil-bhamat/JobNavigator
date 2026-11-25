@@ -189,12 +189,16 @@ def _register_jobs(scrape_interval, email_interval, backup_cron, digest_cron, h1
         )
 
     if email_interval > 0:
-        scheduler.add_job(
-            run_email_check,  # per account (Gmail accounts)
-            IntervalTrigger(minutes=email_interval),
-            id="email_check",
-            replace_existing=True,
-        )
+        from backend.config import JN_ENABLE_GMAIL
+        if JN_ENABLE_GMAIL:
+            scheduler.add_job(
+                run_email_check,  # per account (Gmail accounts)
+                IntervalTrigger(minutes=email_interval),
+                id="email_check",
+                replace_existing=True,
+            )
+        else:
+            logger.info("Gmail integration disabled (JN_ENABLE_GMAIL=0); email_check not scheduled.")
 
     # Telemetry (telemetry/umami.py): sends only what the owner allowed, else does nothing.
     scheduler.add_job(

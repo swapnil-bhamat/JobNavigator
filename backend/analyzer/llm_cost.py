@@ -69,6 +69,13 @@ PRICING: dict[str, dict[str, dict]] = {
         "o3-pro": _oa(20.0, 80.0),
         "o4-mini": _oa(1.10, 4.40, 0.275),
     },
+    # Gemini pricing (USD per 1M tokens) — verify against official Gemini API pricing docs
+    # before locking defaults. Unknown models fall back to conservative budget estimation.
+    "gemini": {
+        "gemini-2.5-flash": _oa(0.15, 0.60, 0.0375),
+        "gemini-2.5-pro": _oa(1.25, 10.0, 0.3125),
+        "gemini-2.0-flash": _oa(0.10, 0.40, 0.025),
+    },
 }
 
 # Providers whose calls are covered by flat subscription / local compute — always $0.

@@ -341,6 +341,10 @@ async def run_lookup(per_run: int, fetch=None, pause: float = PAUSE, resolve=Non
 
 
 async def _linkedin_pass(per_run: int, fetch, pause: float, resolve, check=None) -> dict:
+    from backend.config import JN_ENABLE_UNOFFICIAL_LINKEDIN
+    if not JN_ENABLE_UNOFFICIAL_LINKEDIN:
+        return {"looked_up": 0, "employer": 0, "easy_apply": 0, "board": 0, "gone": 0, "closed": 0,
+                "cached": 0, "stopped": "disabled"}
     from backend.accounts.context import unscoped
     from backend.models.db import LinkedinLookup, SessionLocal
     from backend.scraper._shared.postings import resolve_short_link

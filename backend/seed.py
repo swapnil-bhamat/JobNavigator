@@ -1719,9 +1719,7 @@ def seed_mock_resume(db):
 
 
 def seed_persona(db):
-    """Ensure the owner's Persona exists with empty nodes (other accounts get theirs on
-    first access, backend.accounts.owned.get_persona). Explicit account filter: this runs
-    inside unscoped() at startup."""
+    """Ensure the owner's Persona exists with the initial editable career profile."""
     from backend.models.db import Persona, get_owner_id
     owner_id = get_owner_id(db)
     q = db.query(Persona)
@@ -1731,17 +1729,77 @@ def seed_persona(db):
         return
     p = Persona(
         account_id=owner_id,
-        contact={},
-        work_auth={},
+        contact={
+            "location": "Nagpur, Maharashtra, India",
+            "city": "Nagpur",
+            "state": "Maharashtra",
+            "country": "India",
+        },
+        work_auth={
+            "country": "India",
+            "relocation": False,
+            "remote_only": True,
+            "notice_period_days": 60,
+        },
         demographics={},
-        compensation={},
-        preferences={},
-        resume_content={},
+        compensation={
+            "currency": "INR",
+            "current_lpa": 33,
+            "target_min_lpa": 50,
+            "target_max_lpa": 60,
+        },
+        preferences={
+            "work_arrangement": "remote",
+            "relocation_willing": False,
+            "years_experience": 12,
+            "current_role": "Senior Software Engineer – Architecture Track",
+            "target_titles": [
+                "Staff Software Engineer",
+                "Staff Frontend Engineer",
+                "Staff Full-Stack Engineer",
+                "Principal Software Engineer",
+                "Software Architect",
+                "Frontend Architect",
+                "Platform Engineer",
+                "Engineering Lead",
+            ],
+            "focus_areas": [
+                "Architecture",
+                "Platform engineering",
+                "Technical leadership",
+                "Complex application development",
+            ],
+        },
+        resume_content={
+            "summary": (
+                "Senior Software Engineer (Architecture Track) with 12+ years of experience "
+                "across frontend architecture, JavaScript ecosystem, Canvas & Three.js, "
+                "3D product configurators, full-stack & backend engineering, and e-commerce/platform engineering."
+            ),
+            "skills": {
+                "Core": [
+                    "JavaScript ecosystem",
+                    "Frontend architecture",
+                    "Canvas",
+                    "Three.js",
+                    "3D product configurators",
+                    "Full-stack development",
+                    "Backend engineering",
+                    "E-commerce",
+                    "Platform engineering",
+                ]
+            },
+            "experience": [],
+            "projects": [],
+            "education": [],
+            "certifications": [],
+            "achievements": [],
+        },
         qa_bank=[],
     )
     db.add(p)
     db.commit()
-    logger.info("Owner Persona seeded with empty nodes")
+    logger.info("Owner Persona seeded with initial editable career profile")
 
 
 def migrate_h1b_to_visa_cache(db):

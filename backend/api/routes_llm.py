@@ -198,3 +198,67 @@ async def list_models(provider: str = "openrouter"):
     models.sort(key=lambda m: m["id"])
     _cache[cache_key] = {"at": now, "models": models}
     return {"models": models, "cached": False}
+
+
+@router.get("/budget")
+def llm_budget_status():
+    """Return current monthly AI budget usage in INR."""
+    from backend.analyzer.budget_guard import get_budget_status
+    with SessionLocal() as db:
+        return get_budget_status(db)
+
+
+@router.get("/verify-gemini")
+async def verify_gemini_connectivity(test_structured: bool = False):
+    """Verify Gemini API key, model listing via google-genai, and optional structured JSON output.
+
+    Does not require GEMINI_API_KEY for basic app startup; returns configured=False if unset.
+    Never logs or returns the API key.
+    """
+    from backend.config import GEMINI_API_KEY, GEMINI_MODEL_TRIAGE, GEMINI_MODEL_FULL
+    key = GEMINI_API_KEY
+    if not key:
+        with SessionLocal() as db:
+            key = _resolve_key(db, "gemini")
+
+    if not key:
+        return {
+            "configured": False,
+            "triage_model": GEMINI_MODEL_TRIAGE,
+            "full_model": GEMINI_MODEL_FULL,
+            "message": "GEMINI_API_KEY not set; application runs normally in non-AI mode.",
+        }
+
+    try:
+        from google import genai
+        client = genai.Client(api_key=key)
+        models = list(client.models.list())
+        model_ids = {getattr(m, "name", "").removeprefix("models/") for m in models if getattr(m, "name", "")}
+    except Exception as e:
+        raise HTTPException(502, f"Gemini model listing failed: {type(e).__name__}")
+
+    result = {
+        "configured": True,
+        "models_count": len(model_ids),
+        "triage_model": GEMINI_MODEL_TRIAGE,
+        "triage_model_available": (GEMINI_MODEL_TRIAGE in model_ids) if GEMINI_MODEL_TRIAGE else None,
+        "full_model": GEMINI_MODEL_FULL,
+        "full_model_available": (GEMINI_MODEL_FULL in model_ids) if GEMINI_MODEL_FULL else None,
+        "structured_output_tested": False,
+    }
+
+    if test_structured and GEMINI_MODEL_TRIAGE:
+        from google.genai import types
+        resp = await client.aio.models.generate_content(
+            model=GEMINI_MODEL_TRIAGE,
+            contents='Return JSON: {"ok": true}',
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                max_output_tokens=32,
+            ),
+        )
+        content = getattr(resp, "text", "") or ""
+        result["structured_output_tested"] = True
+        result["structured_output_ok"] = '"ok"' in content
+
+    return result

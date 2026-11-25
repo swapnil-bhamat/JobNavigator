@@ -340,6 +340,9 @@ class Job(AccountScoped, Base):
     best_cv_score = Column(Float, nullable=True, index=True)
     best_cv = Column(String, nullable=True)
     scoring_report = Column(JSON, nullable=True)  # Structured report: summary, keywords, requirement mapping
+    remote_eligibility = Column(String(32), nullable=True, index=True)  # india_remote | worldwide_remote | country_restricted_remote | hybrid | onsite | unknown
+    evaluation_cache_key = Column(String(64), nullable=True, index=True)
+    evaluation_dimensions = Column(JSON, nullable=True)
     # 3.1: cv_scores / scoring_report / best_cv are keyed by résumé id ("Tailored" and "Persona"
     # as before); this keeps {résumé id: name at scoring time} so a deleted résumé keeps a label.
     # Read and written through backend/analyzer/score_keys.py.
@@ -624,9 +627,40 @@ class LlmCallLog(AccountScoped, Base):
     cache_read_tokens = Column(Integer, default=0, nullable=False)
     cache_write_tokens = Column(Integer, default=0, nullable=False)
     cost_usd = Column(Float, default=0.0, nullable=False)
+    cost_inr = Column(Float, default=0.0, nullable=False)
+    usd_to_inr_rate = Column(Float, nullable=True)
+    reservation_id = Column(UUID(as_uuid=True), ForeignKey("llm_budget_reservations.id", ondelete="SET NULL"), nullable=True)
     duration_ms = Column(Integer, default=0, nullable=False)
     success = Column(Boolean, default=True, nullable=False)
     error = Column(Text, nullable=True)
+
+
+# ── AI Budget Guard (monthly INR ledger + atomic reservations) ────────────────
+class LlmBudgetLedger(Base):
+    __tablename__ = "llm_budget_ledger"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    month_key = Column(String(7), unique=True, nullable=False, index=True)  # YYYY-MM (UTC)
+    budget_inr = Column(Float, nullable=False, default=500.0)
+    reserved_inr = Column(Float, nullable=False, default=0.0)
+    spent_inr = Column(Float, nullable=False, default=0.0)
+    warned_80_at = Column(DateTime(timezone=True), nullable=True)
+    tripped_100_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class LlmBudgetReservation(Base):
+    __tablename__ = "llm_budget_reservations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ledger_id = Column(UUID(as_uuid=True), ForeignKey("llm_budget_ledger.id", ondelete="CASCADE"), nullable=False, index=True)
+    account_id = _account_fk()
+    purpose = Column(String, nullable=False, default="")
+    estimated_inr = Column(Float, nullable=False, default=0.0)
+    actual_inr = Column(Float, nullable=True)
+    status = Column(String(16), nullable=False, default="reserved")  # reserved | settled | released
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    settled_at = Column(DateTime(timezone=True), nullable=True)
 
 
 # ── Activity Log ────────────────────────────────────────────────────────────

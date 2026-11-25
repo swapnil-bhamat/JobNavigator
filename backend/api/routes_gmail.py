@@ -32,12 +32,18 @@ from sqlalchemy.orm import Session
 from backend.accounts import auth as acct_auth
 from backend.accounts.context import current_account, unscoped
 from backend.accounts.settings import _account_row, install_row, member_account
+from backend.config import JN_ENABLE_GMAIL
 from backend.email_monitor import gmail_auth
 from backend.models.db import Account, get_db, get_owner_id
 
 logger = logging.getLogger("jobnavigator.gmail")
 
 router = APIRouter(prefix="/gmail", tags=["gmail"])
+
+
+def _require_gmail_enabled():
+    if not JN_ENABLE_GMAIL:
+        raise HTTPException(403, "Gmail integration is disabled (set JN_ENABLE_GMAIL=1 to enable).")
 
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 
@@ -64,6 +70,7 @@ def gmail_status(db: Session = Depends(get_db)):
 
 @router.get("/connect", summary="Google consent URL for the current account")
 def gmail_connect(request: Request, db: Session = Depends(get_db)):
+    _require_gmail_enabled()
     client_id, _secret = gmail_auth.client_config()
     if not gmail_auth.is_configured():
         raise HTTPException(status_code=503, detail="gmail_not_configured")
@@ -79,6 +86,7 @@ def gmail_connect(request: Request, db: Session = Depends(get_db)):
 @router.get("/callback", summary="Google OAuth redirect target (public)", include_in_schema=False)
 async def gmail_callback(request: Request, code: str = None, state: str = None, error: str = None,
                          db: Session = Depends(get_db)):
+    _require_gmail_enabled()
     response = await _callback(request, code, state, error, db)
     gmail_auth.clear_browser_cookie(response)
     return response

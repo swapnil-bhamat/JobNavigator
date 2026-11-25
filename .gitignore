@@ -82,6 +82,8 @@ ipython_config.py
 
 # Environments
 .env
+.env.*
+!.env.example
 .envrc
 .venv
 env/
@@ -89,6 +91,12 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Backups, keys, and local career data
+backups/
+data/
+*.age
+*.key
 
 # Spyder project settings
 .spyderproject

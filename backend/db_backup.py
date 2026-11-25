@@ -52,14 +52,28 @@ def filter_dump(src, dst, drop_running_backup_row: bool = True) -> dict:
 
 
 def prune(prefix: str, keep: int = KEEP) -> int:
-    """Delete all but the newest `keep` `<prefix>*.sql` files (names carry a timestamp, so
-    name order is age order). Returns how many were deleted."""
-    files = sorted(glob.glob(f"{BACKUP_DIR}/{prefix}*.sql"))
+    """Delete all but the newest `keep` `<prefix>*.sql` or `<prefix>*.age` files."""
+    files = sorted(glob.glob(f"{BACKUP_DIR}/{prefix}*.sql") + glob.glob(f"{BACKUP_DIR}/{prefix}*.age"))
     n = 0
     while len(files) > keep:
         os.remove(files.pop(0))
         n += 1
     return n
+
+
+def encrypt_file_age(src_path: str, recipient: str) -> str:
+    """Encrypt `src_path` with `age` public recipient key; removes plaintext `src_path`."""
+    out_path = src_path + ".age"
+    res = subprocess.run(
+        ["age", "-r", recipient, "-o", out_path, src_path],
+        capture_output=True, text=True, timeout=120,
+    )
+    if res.returncode != 0:
+        if os.path.exists(out_path):
+            os.remove(out_path)
+        raise RuntimeError(f"age encryption failed: {res.stderr}")
+    os.remove(src_path)
+    return out_path
 
 
 def run_pg_dump(prefix: str = ROTATION_PREFIX, suffix: str = "", rotate: bool = True,
@@ -100,8 +114,14 @@ def run_pg_dump(prefix: str = ROTATION_PREFIX, suffix: str = "", rotate: bool = 
     finally:
         os.remove(raw_file)
 
+    from backend.config import BACKUP_AGE_RECIPIENT
+    encrypted = False
+    if BACKUP_AGE_RECIPIENT:
+        backup_file = encrypt_file_age(backup_file, BACKUP_AGE_RECIPIENT)
+        encrypted = True
+
     pruned = prune(prefix) if rotate else 0
 
     size_mb = os.path.getsize(backup_file) / (1024 * 1024)
     return {"path": backup_file, "file": os.path.basename(backup_file),
-            "size_mb": size_mb, "pruned": pruned}
+            "size_mb": size_mb, "pruned": pruned, "encrypted": encrypted}
