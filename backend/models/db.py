@@ -494,6 +494,7 @@ class Application(AccountScoped, Base):
     applied_at = Column(DateTime(timezone=True), default=utcnow)
     cv_version_used = Column(String, nullable=True)
     cover_letter_id = Column(UUID(as_uuid=True), ForeignKey("cover_letters.id", ondelete="SET NULL"), nullable=True)
+    recruiter_id = Column(UUID(as_uuid=True), ForeignKey("recruiters.id", ondelete="SET NULL"), nullable=True)
     follow_up_date = Column(Date, nullable=True)
     notes = Column(Text, nullable=True)
     next_action = Column(String, nullable=True)
@@ -785,6 +786,31 @@ class Persona(AccountScoped, Base):
     preferences = Column(JSON, default=dict)
     resume_content = Column(JSON, default=dict)
     qa_bank = Column(JSON, default=list)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+# ── Recruiters (compliant manual CRM) ───────────────────────────────────────
+class Recruiter(AccountScoped, Base):
+    __tablename__ = "recruiters"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id = _account_fk()
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True, index=True)
+    application_id = Column(UUID(as_uuid=True), ForeignKey("applications.id", ondelete="SET NULL"), nullable=True, index=True)
+    name = Column(String, nullable=False)
+    title = Column(String, nullable=True)
+    company = Column(String, nullable=True)
+    profile_url = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+    source_provenance = Column(String(32), nullable=False, default="manual_entry")  # manual_entry | user_supplied_url | public_company_page
+    outreach_status = Column(String(32), nullable=False, default="not_contacted")
+    draft_connection_note = Column(Text, nullable=True)
+    draft_outreach_msg = Column(Text, nullable=True)
+    draft_followup_msg = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    last_contacted_at = Column(DateTime(timezone=True), nullable=True)
+    follow_up_at = Column(Date, nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
