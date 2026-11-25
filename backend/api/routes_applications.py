@@ -24,7 +24,19 @@ class _ReadBlocked(Exception):
 router = APIRouter(prefix="/applications", tags=["applications"])
 
 
-VALID_STATUSES = {"applied", "interview", "offer", "rejected"}
+VALID_STATUSES = {
+    "applied",
+    "recruiter_contacted",
+    "recruiter_response",
+    "interview_scheduled",
+    "interview_completed",
+    "offer_received",
+    "rejected",
+    "withdrawn",
+    # Legacy aliases preserved for backward compatibility
+    "interview",
+    "offer",
+}
 
 
 def _parse_dt(value):
@@ -444,7 +456,8 @@ def update_application(app_id: str, updates: dict, db: Session = Depends(get_db)
     if not app:
         raise HTTPException(status_code=404, detail="Application not found")
 
-    allowed = {"status", "notes", "next_action", "next_action_date", "cv_version_used", "applied_at"}
+    allowed = {"status", "notes", "next_action", "next_action_date", "cv_version_used", "applied_at",
+               "cover_letter_id", "follow_up_date"}
     if "status" in updates and updates["status"] not in VALID_STATUSES:
         raise HTTPException(status_code=400,
                             detail=f"status must be one of {sorted(VALID_STATUSES)}")
@@ -819,7 +832,7 @@ def update_interview(interview_id: str, updates: dict, db: Session = Depends(get
     iv = db.query(Interview).filter(Interview.id == interview_id).first()
     if not iv:
         raise HTTPException(status_code=404, detail="Interview not found")
-    for key in ("what", "where_text", "status", "prep"):
+    for key in ("what", "where_text", "status", "prep", "prep_plan", "feedback_notes"):
         if key in updates:
             setattr(iv, key, updates[key])
     if "when_at" in updates:
@@ -837,6 +850,20 @@ def delete_interview(interview_id: str, db: Session = Depends(get_db)):
     db.delete(iv)
     db.commit()
     return {"deleted": True}
+
+
+@router.post("/{app_id}/generate-prep")
+async def generate_prep_endpoint(app_id: str, interview_id: Optional[str] = None, db: Session = Depends(get_db)):
+    """Generate AI interview preparation plan grounded in verified Persona and job description."""
+    from backend.accounts.owned import get_persona
+    from backend.analyzer.interview_prep import generate_interview_prep
+
+    app = db.query(Application).filter(Application.id == app_id).first()
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found")
+    job = db.query(Job).filter(Job.id == app.job_id).first()
+    persona = get_persona(db)
+    return await generate_interview_prep(db, app, job, persona, interview_id=interview_id)
 
 
 @router.get("/{app_id}/prep")
@@ -987,5 +1014,7 @@ def _interview_to_dict(i) -> dict:
         "where_text": i.where_text,
         "status": i.status or "scheduled",
         "prep": i.prep,
+        "prep_plan": getattr(i, "prep_plan", None),
+        "feedback_notes": getattr(i, "feedback_notes", None),
         "created_at": i.created_at.isoformat() if i.created_at else None,
     }

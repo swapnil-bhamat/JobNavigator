@@ -789,3 +789,49 @@ async def _handle_callback(callback_data: str, message_id: int = None):
         return "Unknown action"
     finally:
         db.close()
+
+
+async def send_document_ready_alert(doc_type: str, title: str, company: str) -> bool:
+    chat_id, token = resolve_target()
+    if not chat_id or not _is_enabled():
+        return False
+    msg = (
+        f"<b>{html.escape(doc_type)} Draft Ready (Awaiting Approval)</b>\n"
+        f"{html.escape(title)} at <b>{html.escape(company)}</b>"
+    )
+    return await _send_message(chat_id, msg, **_bot(token))
+
+
+async def send_followup_reminder(company: str, title: str, follow_up_date: str) -> bool:
+    chat_id, token = resolve_target()
+    if not chat_id or not _is_enabled():
+        return False
+    msg = (
+        f"<b>Follow-up Due ({html.escape(follow_up_date)})</b>\n"
+        f"{html.escape(title)} at <b>{html.escape(company)}</b>"
+    )
+    return await _send_message(chat_id, msg, **_bot(token))
+
+
+async def send_interview_reminder(company: str, title: str, what: str, when_str: str) -> bool:
+    chat_id, token = resolve_target()
+    if not chat_id or not _is_enabled():
+        return False
+    msg = (
+        f"<b>Interview Reminder</b>\n"
+        f"<b>{html.escape(what)}</b> — {html.escape(title)} at <b>{html.escape(company)}</b>\n"
+        f"When: {html.escape(when_str)}"
+    )
+    return await _send_message(chat_id, msg, **_bot(token))
+
+
+async def send_status_change_alert(company: str, title: str, old_status: str, new_status: str) -> bool:
+    chat_id, token = resolve_target()
+    if not chat_id or not _is_enabled():
+        return False
+    msg = (
+        f"<b>Application Status Updated</b>\n"
+        f"{html.escape(title)} at <b>{html.escape(company)}</b>: "
+        f"<code>{html.escape(old_status)}</code> → <code>{html.escape(new_status)}</code>"
+    )
+    return await _send_message(chat_id, msg, **_bot(token))

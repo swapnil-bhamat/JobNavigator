@@ -481,16 +481,20 @@ del _col
 # ── Applications ─────────────────────────────────────────────────────────────
 class Application(AccountScoped, Base):
     __tablename__ = "applications"
-    __table_args__ = (Index("ix_applications_acct_status_updated", "account_id", "status", text("updated_at DESC")),)   # QA F9 / T6-01
+    __table_args__ = (
+        Index("ix_applications_acct_status_updated", "account_id", "status", text("updated_at DESC")),
+        UniqueConstraint("account_id", "job_id", name="uq_applications_account_job"),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     account_id = _account_fk()
     job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id"), nullable=False)
     status = Column(String, default="applied")
-    # applied|interview|offer|rejected. Retired screening/phone_screen/final_round
-    # values are backfilled by seed.run_migrations; status_transitions is left unchanged.
+    # applied | recruiter_contacted | recruiter_response | interview_scheduled | interview_completed | offer_received | rejected | withdrawn
     applied_at = Column(DateTime(timezone=True), default=utcnow)
     cv_version_used = Column(String, nullable=True)
+    cover_letter_id = Column(UUID(as_uuid=True), ForeignKey("cover_letters.id", ondelete="SET NULL"), nullable=True)
+    follow_up_date = Column(Date, nullable=True)
     notes = Column(Text, nullable=True)
     next_action = Column(String, nullable=True)
     next_action_date = Column(Date, nullable=True)
@@ -517,6 +521,8 @@ class Interview(AccountScoped, Base):
     where_text = Column(String, nullable=True)                 # "Zoom", "Onsite — London"
     status = Column(String, default="scheduled")   # scheduled | done
     prep = Column(Text, nullable=True)
+    prep_plan = Column(JSON, nullable=True)
+    feedback_notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
     application = relationship("Application", back_populates="interviews")
