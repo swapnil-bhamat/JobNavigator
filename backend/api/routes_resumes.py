@@ -636,6 +636,13 @@ def _resume_to_dict(r: Resume, include_json_data: bool = False) -> dict:
         "job_id": str(r.job_id) if r.job_id else None,
         "template": r.template,
         "page_format": r.page_format,
+        "content_hash": getattr(r, "content_hash", None),
+        "approval_status": getattr(r, "approval_status", "draft"),
+        "approved_content_hash": getattr(r, "approved_content_hash", None),
+        "approved_at": r.approved_at.isoformat() if getattr(r, "approved_at", None) else None,
+        "changes_explanation": getattr(r, "changes_explanation", None),
+        "missing_qualifications": getattr(r, "missing_qualifications", None),
+        "source_facts": getattr(r, "source_facts", None),
         "created_at": r.created_at.isoformat() if r.created_at else None,
         "updated_at": r.updated_at.isoformat() if r.updated_at else None,
     }
@@ -1268,10 +1275,49 @@ def update_resume(resume_id: str, body: dict, db: Session = Depends(get_db)):
             if key == "json_data":
                 flag_modified(resume, "json_data")
 
+    from backend.analyzer.document_guard import sync_content_hash_and_invalidate_if_edited
+    sync_content_hash_and_invalidate_if_edited(resume)
     resume.updated_at = utcnow()
     db.commit()
     db.refresh(resume)
     return _resume_to_dict(resume, include_json_data=True)
+
+
+@router.post("/{resume_id}/approve")
+def approve_resume_endpoint(resume_id: str, db: Session = Depends(get_db)):
+    """Approve the exact current content_hash of this resume."""
+    from backend.analyzer.document_guard import approve_document
+    resume = get_owned_or_404(db, Resume, resume_id)
+    approve_document(resume)
+    resume.updated_at = utcnow()
+    db.commit()
+    db.refresh(resume)
+    return _resume_to_dict(resume, include_json_data=True)
+
+
+@router.post("/{resume_id}/reject")
+def reject_resume_endpoint(resume_id: str, db: Session = Depends(get_db)):
+    """Reject this tailored resume draft."""
+    from backend.analyzer.document_guard import reject_document
+    resume = get_owned_or_404(db, Resume, resume_id)
+    reject_document(resume)
+    resume.updated_at = utcnow()
+    db.commit()
+    db.refresh(resume)
+    return _resume_to_dict(resume, include_json_data=True)
+
+
+@router.post("/{resume_id}/tailor-guarded")
+async def tailor_resume_guarded_endpoint(resume_id: str, body: dict, db: Session = Depends(get_db)):
+    """Generate a tailored resume with anti-fabrication guardrails and awaiting_approval state."""
+    from backend.accounts.owned import get_persona
+    from backend.analyzer.document_guard import tailor_resume_guarded
+    base = get_owned_or_404(db, Resume, resume_id)
+    job_id = owned_id_or_404(db, Job, body.get("job_id"))
+    job = db.query(Job).filter(Job.id == job_id).first()
+    persona = get_persona(db)
+    tailored = await tailor_resume_guarded(db, base, job, persona)
+    return _resume_to_dict(tailored, include_json_data=True)
 
 
 @router.delete("/{resume_id}")
@@ -1419,9 +1465,16 @@ _PREVIEW_CSP = ("sandbox; default-src 'none'; style-src 'unsafe-inline' https://
 
 
 @router.get("/{resume_id}/pdf")
-async def export_pdf(resume_id: str, template: Optional[str] = None, format: Optional[str] = None, db: Session = Depends(get_db)):
-    """Render resume as PDF via Playwright; `template`/`format` query params override the stored values so a rapid template switch in the live editor doesn't race the debounced PATCH."""
+async def export_pdf(resume_id: str, template: Optional[str] = None, format: Optional[str] = None, final: bool = False, db: Session = Depends(get_db)):
+    """Render resume as PDF via Playwright; `final=true` requires an approved, unedited version."""
     resume = get_owned_or_404(db, Resume, resume_id)
+    if final:
+        from backend.analyzer.document_guard import require_approved_for_final_export
+        try:
+            require_approved_for_final_export(resume)
+        except HTTPException:
+            db.commit()
+            raise
 
     tpl = template or resume.template
     fmt = (format or resume.page_format or "letter")
@@ -1708,10 +1761,16 @@ def _build_docx(json_data: dict, fmt: str, footer_text: str = "") -> bytes:
 
 
 @router.get("/{resume_id}/docx")
-def export_docx(resume_id: str, template: Optional[str] = None, format: Optional[str] = None, db: Session = Depends(get_db)):
-    """Export the résumé as an editable Word document. One layout for every template, so
-    `template` is accepted only for parity with /pdf; `format` overrides the paper size."""
+def export_docx(resume_id: str, template: Optional[str] = None, format: Optional[str] = None, final: bool = False, db: Session = Depends(get_db)):
+    """Export the résumé as an editable Word document; `final=true` requires an approved, unedited version."""
     resume = get_owned_or_404(db, Resume, resume_id)
+    if final:
+        from backend.analyzer.document_guard import require_approved_for_final_export
+        try:
+            require_approved_for_final_export(resume)
+        except HTTPException:
+            db.commit()
+            raise
     fmt = format or resume.page_format or "letter"
     data = _rewrite_urls_with_tracers(resume.json_data or {}, str(resume.id), db)
     try:

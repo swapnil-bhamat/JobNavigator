@@ -138,6 +138,10 @@ def _to_dict(cl: CoverLetter, include_json_data: bool = False, ctx: dict | None 
         "voice": cl.voice,
         "length": cl.length,
         "from_persona": bool(cl.from_persona),
+        "content_hash": getattr(cl, "content_hash", None),
+        "approval_status": getattr(cl, "approval_status", "draft"),
+        "approved_content_hash": getattr(cl, "approved_content_hash", None),
+        "approved_at": cl.approved_at.isoformat() if getattr(cl, "approved_at", None) else None,
         "created_at": cl.created_at.isoformat() if cl.created_at else None,
         "updated_at": cl.updated_at.isoformat() if cl.updated_at else None,
         # display context — the row shows "{source} · {voice} · {length}" and a
@@ -250,6 +254,32 @@ def update_cover_letter(cl_id: str, body: dict, db: Session = Depends(get_db)):
     for k, v in body.items():
         if k in allowed:
             setattr(cl, k, v)
+    from backend.analyzer.document_guard import sync_content_hash_and_invalidate_if_edited
+    sync_content_hash_and_invalidate_if_edited(cl)
+    db.commit()
+    db.refresh(cl)
+    return _to_dict(cl, include_json_data=True, ctx=_build_ctx([cl], db).get(cl.id))
+
+
+@router.post("/{cl_id}/approve")
+def approve_cover_letter_endpoint(cl_id: str, db: Session = Depends(get_db)):
+    from backend.analyzer.document_guard import approve_document
+    cl = db.query(CoverLetter).filter(CoverLetter.id == cl_id).first()
+    if not cl:
+        raise HTTPException(404, "Cover letter not found")
+    approve_document(cl)
+    db.commit()
+    db.refresh(cl)
+    return _to_dict(cl, include_json_data=True, ctx=_build_ctx([cl], db).get(cl.id))
+
+
+@router.post("/{cl_id}/reject")
+def reject_cover_letter_endpoint(cl_id: str, db: Session = Depends(get_db)):
+    from backend.analyzer.document_guard import reject_document
+    cl = db.query(CoverLetter).filter(CoverLetter.id == cl_id).first()
+    if not cl:
+        raise HTTPException(404, "Cover letter not found")
+    reject_document(cl)
     db.commit()
     db.refresh(cl)
     return _to_dict(cl, include_json_data=True, ctx=_build_ctx([cl], db).get(cl.id))
@@ -305,10 +335,17 @@ def delete_cover_letter(cl_id: str, db: Session = Depends(get_db)):
 # ── PDF export ────────────────────────────────────────────────────────────────
 
 @router.get("/{cl_id}/pdf")
-async def export_pdf(cl_id: str, db: Session = Depends(get_db)):
+async def export_pdf(cl_id: str, final: bool = False, db: Session = Depends(get_db)):
     cl = db.query(CoverLetter).filter(CoverLetter.id == cl_id).first()
     if not cl:
         raise HTTPException(404, "Cover letter not found")
+    if final:
+        from backend.analyzer.document_guard import require_approved_for_final_export
+        try:
+            require_approved_for_final_export(cl)
+        except HTTPException:
+            db.commit()
+            raise
 
     pdf_data = _rewrite_urls_with_tracers(cl.json_data or {}, None, db,
                                           cover_letter_id=str(cl.id), job_id=cl.job_id)

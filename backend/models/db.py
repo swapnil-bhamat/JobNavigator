@@ -706,6 +706,13 @@ class Resume(AccountScoped, Base):
     template = Column(String, default=lambda: first_template("resume_templates"))
     page_format = Column(String, default="letter")
     json_data = Column(JSON, default={})
+    content_hash = Column(String(64), nullable=True, index=True)
+    approval_status = Column(String(24), default="draft", nullable=False)  # draft | awaiting_approval | approved | rejected
+    approved_content_hash = Column(String(64), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    changes_explanation = Column(JSON, nullable=True)
+    missing_qualifications = Column(JSON, nullable=True)
+    source_facts = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -730,6 +737,13 @@ class CoverLetter(AccountScoped, Base):
     template = Column(String, default=DEFAULT_COVER_LETTER_TEMPLATE)
     page_format = Column(String, default="letter")
     json_data = Column(JSON, default={})
+    content_hash = Column(String(64), nullable=True, index=True)
+    approval_status = Column(String(24), default="draft", nullable=False)  # draft | awaiting_approval | approved | rejected
+    approved_content_hash = Column(String(64), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    changes_explanation = Column(JSON, nullable=True)
+    missing_qualifications = Column(JSON, nullable=True)
+    source_facts = Column(JSON, nullable=True)
     # How this draft was written; lets the list/editor show it and Regenerate
     # preselect the same settings.
     voice = Column(String, nullable=True)          # voice preset id
