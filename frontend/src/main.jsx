@@ -11,6 +11,11 @@ async function boot() {
     const { installDemo } = await loadDemo('install.js')
     await installDemo()
   }
+  if (!__DEMO__ && 'serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {})
+    })
+  }
   ReactDOM.createRoot(document.getElementById('root')).render(
     <React.StrictMode>
       <App />

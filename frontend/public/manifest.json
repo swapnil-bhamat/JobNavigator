@@ -1,0 +1,23 @@
+{
+  "name": "JobNavigator AI Career Agent",
+  "short_name": "CareerAgent",
+  "description": "Self-hosted, mobile-first AI Career Agent for remote engineering roles.",
+  "start_url": "/feed",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#fcfbf7",
+  "theme_color": "#1e1c17",
+  "icons": [
+    {
+      "src": "/favicon-48.png",
+      "sizes": "48x48",
+      "type": "image/png"
+    },
+    {
+      "src": "/favicon-128.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
